@@ -3,9 +3,26 @@ import { NextRequest, NextResponse } from "next/server";
 
 export const runtime = "nodejs";
 
+const allowedModels = new Set([
+  "gemini-3.5-flash",
+  "gemini-3-flash-preview",
+  "gemini-3.1-flash-lite",
+]);
+
 export async function POST(request: NextRequest) {
   try {
-    const { messages } = await request.json();
+    const { messages, model } = await request.json();
+
+    if (!Array.isArray(messages) || messages.length === 0) {
+      return NextResponse.json(
+        { error: "At least one message is required" },
+        { status: 400 }
+      );
+    }
+
+    const selectedModel = allowedModels.has(model)
+      ? model
+      : "gemini-3.5-flash";
 
     const apiKey = process.env.GOOGLE_GENAI_API_KEY;
     if (!apiKey) {
@@ -16,17 +33,15 @@ export async function POST(request: NextRequest) {
     }
 
     const ai = new GoogleGenAI({ apiKey });
-
-    // Convert chat messages to Gemini format
     const contents = messages.map(
-      (msg: { role: string; content: string }) => ({
-        role: msg.role === "user" ? "user" : "model",
-        parts: [{ text: msg.content }],
+      (message: { role: string; content: string }) => ({
+        role: message.role === "user" ? "user" : "model",
+        parts: [{ text: message.content }],
       })
     );
 
     const response = await ai.models.generateContent({
-      model: "gemini-3-flash-preview",
+      model: selectedModel,
       contents,
     });
 
@@ -34,7 +49,7 @@ export async function POST(request: NextRequest) {
       response.candidates?.[0]?.content?.parts?.[0]?.text ||
       "No response generated";
 
-    return NextResponse.json({ text });
+    return NextResponse.json({ text, model: selectedModel });
   } catch (error) {
     console.error("Chat API error:", error);
     return NextResponse.json(

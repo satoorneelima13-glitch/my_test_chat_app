@@ -1,0 +1,4 @@
+prompt,response,feedback
+"Explain machine learning in two simple sentences.","Machine learning is a way of teaching computers to learn from data and experience instead of following strict, pre-written rules. By finding patterns in past examples, the computer can make its own smart decisions and predictions about new information.","positive"
+"Explain machine learning in two simple sentences.","Machine learning is a way for computers to learn from examples and data instead of following a fixed set of instructions. By finding patterns in that information, the computer can make its own smart guesses or decisions about new situations.","positive"
+"Explain machine learning in two simple sentences.","Machine learning is the process of teaching computers to learn from data rather than following strict programming rules. By recognizing patterns in examples, the computer becomes capable of making its own predictions or decisions.","negative"
