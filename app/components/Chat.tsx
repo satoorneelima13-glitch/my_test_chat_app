@@ -307,6 +307,8 @@ export default function Chat() {
         setStatus("Generation stopped.");
       } else {
         console.error("Error:", error);
+        const message =
+          error instanceof Error ? error.message : "Sorry, I encountered an error. Please try again.";
         setConversations((prev) =>
           prev.map((c) =>
             c.id === finalConvId
@@ -316,7 +318,7 @@ export default function Chat() {
                     ...requestMessages,
                     {
                       role: "assistant",
-                      content: "Sorry, I encountered an error. Please try again.",
+                      content: message,
                     },
                   ],
                 }
@@ -468,7 +470,9 @@ export default function Chat() {
         setStatus("Generation stopped.");
       } else {
         console.error("Regeneration error:", error);
-        setStatus("Response could not be regenerated");
+        const message =
+          error instanceof Error ? error.message : "Response could not be regenerated";
+        setStatus(message);
       }
     } finally {
       if (isCurrent()) {

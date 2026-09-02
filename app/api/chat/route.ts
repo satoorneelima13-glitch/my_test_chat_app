@@ -1,4 +1,4 @@
-import { GoogleGenAI } from "@google/genai";
+import { ApiError, GoogleGenAI } from "@google/genai";
 import { NextRequest, NextResponse } from "next/server";
 import { DEFAULT_MODEL, MODEL_IDS } from "../../lib/models";
 import { buildGenerationConfig, SettingsValidationError } from "../../lib/generationSettings";
@@ -169,6 +169,16 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ text, model: selectedModel });
   } catch (error) {
     console.error("Chat API error:", error);
+    // Confirmed upstream 503 (Gemini reporting transient overload): return
+    // the real status with a fixed, sanitized message. Never forward the
+    // provider's raw payload, message, or any other error detail to the
+    // client. Every other error keeps the existing generic 500.
+    if (error instanceof ApiError && error.status === 503) {
+      return NextResponse.json(
+        { error: "The selected model is temporarily busy. Please try again later." },
+        { status: 503 }
+      );
+    }
     return NextResponse.json(
       { error: "Failed to generate response" },
       { status: 500 }
