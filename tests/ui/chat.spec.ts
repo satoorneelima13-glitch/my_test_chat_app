@@ -33,7 +33,7 @@ test.describe("Chat app (mocked API)", () => {
 
     await expect(page.getByText("mocked reply")).toBeVisible();
     expect(requestBodies).toHaveLength(1);
-    expect(requestBodies[0].settings).toEqual({ temperature: 0.5 });
+    expect(requestBodies[0].settings).toEqual({ temperature: 0.5, frequencyPenalty: 0, presencePenalty: 0 });
   });
 
   test("regeneration resends the current settings", async ({ page }) => {
@@ -50,7 +50,7 @@ test.describe("Chat app (mocked API)", () => {
 
     await page.goto("/");
     await page.getByRole("button", { name: "Settings" }).click();
-    await page.getByLabel("Top P").fill("0.7");
+    await page.getByLabel("Top P", { exact: true }).fill("0.7");
     await page.getByRole("button", { name: "Done" }).click();
 
     await page.getByPlaceholder("Message Gemini").fill("Hi");
@@ -61,7 +61,12 @@ test.describe("Chat app (mocked API)", () => {
     await expect(page.getByText("reply 2")).toBeVisible();
 
     expect(bodies).toHaveLength(2);
-    expect(bodies[1].settings).toEqual({ temperature: 0.5, topP: 0.7 });
+    expect(bodies[1].settings).toEqual({
+      temperature: 0.5,
+      topP: 0.7,
+      frequencyPenalty: 0,
+      presencePenalty: 0,
+    });
   });
 
   test("invalid settings are rejected client-side before any request is sent", async ({ page }) => {
@@ -77,7 +82,7 @@ test.describe("Chat app (mocked API)", () => {
 
     await page.goto("/");
     await page.getByRole("button", { name: "Settings" }).click();
-    await page.getByLabel("Stop sequences").fill("a,b,c,d,e,f");
+    await page.getByLabel("Stop sequences", { exact: true }).fill("a,b,c,d,e,f");
     await page.getByRole("button", { name: "Done" }).click();
 
     await page.getByPlaceholder("Message Gemini").fill("Hi");
@@ -90,23 +95,53 @@ test.describe("Chat app (mocked API)", () => {
   test("reset restores the settings form to its defaults", async ({ page }) => {
     await page.goto("/");
     await page.getByRole("button", { name: "Settings" }).click();
-    await page.getByLabel("Top P").fill("0.9");
-    await page.getByLabel("Temperature").fill("1.2");
+    await page.getByLabel("Top P", { exact: true }).fill("0.9");
+    await page.getByLabel("Temperature", { exact: true }).fill("1.2");
 
     await page.getByRole("button", { name: "Reset to defaults" }).click();
 
-    await expect(page.getByLabel("Temperature")).toHaveValue("0.5");
-    await expect(page.getByLabel("Top P")).toHaveValue("");
+    await expect(page.getByLabel("Temperature", { exact: true })).toHaveValue("0.5");
+    await expect(page.getByLabel("Top P", { exact: true })).toHaveValue("");
   });
 
-  test("the three unverified controls are disabled with an accurate explanation", async ({ page }) => {
+  test("topK, frequency penalty, and presence penalty are editable and sent unchanged", async ({
+    page,
+  }) => {
+    const requestBodies: Array<{ settings?: Record<string, unknown> }> = [];
+    await page.route("**/api/chat", async (route) => {
+      requestBodies.push(route.request().postDataJSON());
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({ text: "ok" }),
+      });
+    });
+
     await page.goto("/");
     await page.getByRole("button", { name: "Settings" }).click();
 
-    await expect(page.getByLabel("Top K")).toBeDisabled();
-    await expect(page.getByLabel("Frequency penalty")).toBeDisabled();
-    await expect(page.getByLabel("Presence penalty")).toBeDisabled();
-    await expect(page.getByText("Support not yet verified for this model.")).toHaveCount(3);
+    await expect(page.getByLabel("Top K", { exact: true })).toBeEnabled();
+    await expect(page.getByLabel("Frequency penalty", { exact: true })).toBeEnabled();
+    await expect(page.getByLabel("Presence penalty", { exact: true })).toBeEnabled();
+    await expect(page.getByLabel("Frequency penalty", { exact: true })).toHaveValue("0");
+    await expect(page.getByLabel("Presence penalty", { exact: true })).toHaveValue("0");
+
+    await page.getByLabel("Top K", { exact: true }).fill("20");
+    await page.getByLabel("Frequency penalty", { exact: true }).fill("1.5");
+    await page.getByLabel("Presence penalty", { exact: true }).fill("-0.5");
+    await page.getByRole("button", { name: "Done" }).click();
+
+    await page.getByPlaceholder("Message Gemini").fill("Hi");
+    await page.getByRole("button", { name: "Send" }).click();
+    await expect(page.getByText("ok")).toBeVisible();
+
+    expect(requestBodies).toHaveLength(1);
+    expect(requestBodies[0].settings).toEqual({
+      temperature: 0.5,
+      topK: 20,
+      frequencyPenalty: 1.5,
+      presencePenalty: -0.5,
+    });
   });
 
   test("model selection, thumbs-up feedback, copy, and edit still work", async ({ page }) => {

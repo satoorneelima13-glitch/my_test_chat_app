@@ -185,7 +185,7 @@ test.describe("Chat app streaming (mocked API)", () => {
     await page.goto("/");
     await page.getByRole("button", { name: "Settings" }).click();
     await page.getByLabel("Stream responses").check();
-    await page.getByLabel("Top P").fill("0.6");
+    await page.getByLabel("Top P", { exact: true }).fill("0.6");
     await page.getByRole("button", { name: "Done" }).click();
 
     await page.getByPlaceholder("Message Gemini").fill("Hi");
@@ -197,7 +197,12 @@ test.describe("Chat app streaming (mocked API)", () => {
 
     expect(bodies).toHaveLength(2);
     expect(bodies[1].stream).toBe(true);
-    expect(bodies[1].settings).toEqual({ temperature: 0.5, topP: 0.6 });
+    expect(bodies[1].settings).toEqual({
+      temperature: 0.5,
+      topP: 0.6,
+      frequencyPenalty: 0,
+      presencePenalty: 0,
+    });
   });
 
   test("feedback, copy, and edit still work after a streamed response completes", async ({ page }) => {

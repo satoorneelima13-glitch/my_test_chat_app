@@ -1,13 +1,15 @@
 import { MAX_STOP_SEQUENCES, RawGenerationSettings } from "./generationSettings";
 
-// Form state for the five controllable settings. topK, frequencyPenalty, and
-// presencePenalty are intentionally not represented here: their controls are
-// permanently disabled (support unverified for every available model), so
-// there is nothing to parse for them — see Chat.tsx.
+// Form state for all eight controllable settings. Every field is editable;
+// whether a specific model actually accepts a given field is decided by the
+// provider at request time, not by this form (see generationSettings.ts).
 export interface SettingsFormState {
   temperature: string;
   topP: string;
+  topK: string;
   maxOutputTokens: string;
+  frequencyPenalty: string;
+  presencePenalty: string;
   stopSequences: string;
   seed: string;
 }
@@ -15,7 +17,10 @@ export interface SettingsFormState {
 export const DEFAULT_SETTINGS_FORM: SettingsFormState = {
   temperature: "0.5",
   topP: "",
+  topK: "",
   maxOutputTokens: "",
+  frequencyPenalty: "0",
+  presencePenalty: "0",
   stopSequences: "",
   seed: "",
 };
@@ -42,6 +47,8 @@ const parseOptionalNumber = (field: string, raw: string, errors: string[]): numb
  * (numeric parsing, max stop-sequence count) so obviously invalid input is
  * rejected before a network round trip. The server independently re-validates
  * everything via buildGenerationConfig — this function does not replace that.
+ * A blank field is omitted (model default / unset); a value of "0" is a
+ * genuine zero and is preserved, never treated as blank.
  */
 export function parseSettingsForm(form: SettingsFormState): ParsedSettingsResult {
   const errors: string[] = [];
@@ -53,8 +60,17 @@ export function parseSettingsForm(form: SettingsFormState): ParsedSettingsResult
   const topP = parseOptionalNumber("Top P", form.topP, errors);
   if (topP !== undefined) settings.topP = topP;
 
+  const topK = parseOptionalNumber("Top K", form.topK, errors);
+  if (topK !== undefined) settings.topK = topK;
+
   const maxOutputTokens = parseOptionalNumber("Max output tokens", form.maxOutputTokens, errors);
   if (maxOutputTokens !== undefined) settings.maxOutputTokens = maxOutputTokens;
+
+  const frequencyPenalty = parseOptionalNumber("Frequency penalty", form.frequencyPenalty, errors);
+  if (frequencyPenalty !== undefined) settings.frequencyPenalty = frequencyPenalty;
+
+  const presencePenalty = parseOptionalNumber("Presence penalty", form.presencePenalty, errors);
+  if (presencePenalty !== undefined) settings.presencePenalty = presencePenalty;
 
   const seed = parseOptionalNumber("Seed", form.seed, errors);
   if (seed !== undefined) settings.seed = seed;

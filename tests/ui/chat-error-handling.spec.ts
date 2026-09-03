@@ -38,6 +38,32 @@ test.describe("Chat app error handling (mocked API)", () => {
     await expect(page.getByText("Sorry, I encountered an error. Please try again.")).not.toBeVisible();
   });
 
+  test("a sanitized 400 (provider-rejected setting) shows an actionable message, no raw payload", async ({
+    page,
+  }) => {
+    await page.route("**/api/chat", async (route) => {
+      await route.fulfill({
+        status: 400,
+        contentType: "application/json",
+        body: JSON.stringify({
+          error:
+            "The selected model rejected one of the provided settings. Try adjusting or clearing a setting and sending again.",
+        }),
+      });
+    });
+
+    await page.goto("/");
+    await page.getByPlaceholder("Message Gemini").fill("Hi");
+    await page.getByRole("button", { name: "Send" }).click();
+
+    await expect(
+      page.getByText(
+        "The selected model rejected one of the provided settings. Try adjusting or clearing a setting and sending again."
+      )
+    ).toBeVisible();
+    await expect(page.getByText("Sorry, I encountered an error. Please try again.")).not.toBeVisible();
+  });
+
   test("a sanitized 503 response shows the same safe message during regeneration", async ({ page }) => {
     let attempt = 0;
     await page.route("**/api/chat", async (route) => {

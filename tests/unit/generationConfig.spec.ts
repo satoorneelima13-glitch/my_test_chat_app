@@ -14,10 +14,14 @@ test.describe("buildGenerationConfig", () => {
   });
 
   test("preserves valid zero values instead of treating them as unset", () => {
-    expect(buildGenerationConfig({ temperature: 0, topP: 0, seed: 0 })).toEqual({
+    expect(
+      buildGenerationConfig({ temperature: 0, topP: 0, seed: 0, frequencyPenalty: 0, presencePenalty: 0 })
+    ).toEqual({
       temperature: 0,
       topP: 0,
       seed: 0,
+      frequencyPenalty: 0,
+      presencePenalty: 0,
     });
   });
 
@@ -26,14 +30,20 @@ test.describe("buildGenerationConfig", () => {
       buildGenerationConfig({
         temperature: 0.5,
         topP: 0.9,
+        topK: 20,
         maxOutputTokens: 1024,
+        frequencyPenalty: 1.5,
+        presencePenalty: -0.5,
         seed: 42,
         stopSequences: ["STOP", "END"],
       })
     ).toEqual({
       temperature: 0.5,
       topP: 0.9,
+      topK: 20,
       maxOutputTokens: 1024,
+      frequencyPenalty: 1.5,
+      presencePenalty: -0.5,
       seed: 42,
       stopSequences: ["STOP", "END"],
     });
@@ -84,18 +94,31 @@ test.describe("buildGenerationConfig", () => {
     expect(buildGenerationConfig({ stopSequences: [] })).toEqual({});
   });
 
-  test("rejects topK, frequencyPenalty, and presencePenalty outright regardless of value", () => {
-    expect(() => buildGenerationConfig({ topK: 10 })).toThrow(SettingsValidationError);
-    expect(() => buildGenerationConfig({ frequencyPenalty: 0 })).toThrow(SettingsValidationError);
-    expect(() => buildGenerationConfig({ presencePenalty: -1 })).toThrow(SettingsValidationError);
+  test("accepts topK as a positive integer, rejects non-integer or non-positive values", () => {
+    expect(buildGenerationConfig({ topK: 1 })).toEqual({ topK: 1 });
+    expect(buildGenerationConfig({ topK: 40 })).toEqual({ topK: 40 });
+    expect(() => buildGenerationConfig({ topK: 0 })).toThrow(SettingsValidationError);
+    expect(() => buildGenerationConfig({ topK: -1 })).toThrow(SettingsValidationError);
+    expect(() => buildGenerationConfig({ topK: 1.5 })).toThrow(SettingsValidationError);
 
     try {
-      buildGenerationConfig({ topK: 10 });
+      buildGenerationConfig({ topK: 0 });
       throw new Error("expected buildGenerationConfig to throw");
     } catch (err) {
       expect(err).toBeInstanceOf(SettingsValidationError);
       expect((err as InstanceType<typeof SettingsValidationError>).field).toBe("topK");
     }
+  });
+
+  test("accepts frequencyPenalty and presencePenalty within -2..2, rejects outside it", () => {
+    expect(buildGenerationConfig({ frequencyPenalty: -2 })).toEqual({ frequencyPenalty: -2 });
+    expect(buildGenerationConfig({ frequencyPenalty: 2 })).toEqual({ frequencyPenalty: 2 });
+    expect(buildGenerationConfig({ presencePenalty: -2 })).toEqual({ presencePenalty: -2 });
+    expect(buildGenerationConfig({ presencePenalty: 2 })).toEqual({ presencePenalty: 2 });
+    expect(() => buildGenerationConfig({ frequencyPenalty: 2.1 })).toThrow(SettingsValidationError);
+    expect(() => buildGenerationConfig({ frequencyPenalty: -2.1 })).toThrow(SettingsValidationError);
+    expect(() => buildGenerationConfig({ presencePenalty: 2.1 })).toThrow(SettingsValidationError);
+    expect(() => buildGenerationConfig({ presencePenalty: -2.1 })).toThrow(SettingsValidationError);
   });
 
   test("rejects a non-object settings payload", () => {

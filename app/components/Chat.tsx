@@ -23,6 +23,7 @@ import {
 import { RawGenerationSettings } from "../lib/generationSettings";
 import { drainStreamLines, StreamProtocolError } from "../lib/streamProtocol";
 import { TEST_SYNTHETIC_STREAM_MODEL } from "../lib/streamTestFixture";
+import SettingTooltip from "./SettingTooltip";
 
 const isAbortError = (error: unknown): boolean =>
   error instanceof DOMException && error.name === "AbortError";
@@ -799,12 +800,15 @@ export default function Chat() {
               </div>
 
               <div>
-                <label
-                  htmlFor="setting-temperature"
-                  className="block text-sm font-medium text-gray-700 mb-1"
-                >
-                  Temperature
-                </label>
+                <div className="mb-1 flex items-center gap-1.5">
+                  <label htmlFor="setting-temperature" className="text-sm font-medium text-gray-700">
+                    Temperature
+                  </label>
+                  <SettingTooltip
+                    label="Temperature"
+                    text="Controls randomness. Lower values usually give more predictable responses; higher values give more varied responses."
+                  />
+                </div>
                 <input
                   id="setting-temperature"
                   type="number"
@@ -824,12 +828,15 @@ export default function Chat() {
               </div>
 
               <div>
-                <label
-                  htmlFor="setting-top-p"
-                  className="block text-sm font-medium text-gray-700 mb-1"
-                >
-                  Top P
-                </label>
+                <div className="mb-1 flex items-center gap-1.5">
+                  <label htmlFor="setting-top-p" className="text-sm font-medium text-gray-700">
+                    Top P
+                  </label>
+                  <SettingTooltip
+                    label="Top P"
+                    text="Chooses from the smallest set of likely tokens whose combined probability reaches this value."
+                  />
+                </div>
                 <input
                   id="setting-top-p"
                   type="number"
@@ -847,32 +854,41 @@ export default function Chat() {
               </div>
 
               <div>
-                <label
-                  htmlFor="setting-top-k"
-                  className="block text-sm font-medium text-gray-700 mb-1"
-                >
-                  Top K
-                </label>
+                <div className="mb-1 flex items-center gap-1.5">
+                  <label htmlFor="setting-top-k" className="text-sm font-medium text-gray-700">
+                    Top K
+                  </label>
+                  <SettingTooltip
+                    label="Top K"
+                    text="Limits each next-token choice to the K most likely candidates. Lower values narrow the choices."
+                  />
+                </div>
                 <input
                   id="setting-top-k"
                   type="number"
-                  disabled
-                  value=""
-                  placeholder="Unavailable"
-                  className="w-full rounded-lg border border-gray-200 bg-gray-100 px-3 py-2 text-gray-400 cursor-not-allowed"
+                  min={1}
+                  step={1}
+                  value={settingsForm.topK}
+                  onChange={(e) => setSettingsForm((prev) => ({ ...prev, topK: e.target.value }))}
+                  placeholder="Model default"
+                  className="w-full rounded-lg border border-gray-300 px-3 py-2 text-gray-900 focus:outline-none focus:ring-2 focus:ring-blue-500"
                 />
-                <p className="mt-1 text-xs text-amber-600">
-                  Support not yet verified for this model.
-                </p>
+                <p className="mt-1 text-xs text-gray-500">Optional. Positive integer (1 or greater).</p>
               </div>
 
               <div>
-                <label
-                  htmlFor="setting-max-output-tokens"
-                  className="block text-sm font-medium text-gray-700 mb-1"
-                >
-                  Maximum output tokens
-                </label>
+                <div className="mb-1 flex items-center gap-1.5">
+                  <label
+                    htmlFor="setting-max-output-tokens"
+                    className="text-sm font-medium text-gray-700"
+                  >
+                    Maximum output tokens
+                  </label>
+                  <SettingTooltip
+                    label="Maximum output tokens"
+                    text="Caps the number of tokens generated. Tokens are pieces of words, not a word count."
+                  />
+                </div>
                 <input
                   id="setting-max-output-tokens"
                   type="number"
@@ -890,52 +906,71 @@ export default function Chat() {
               </div>
 
               <div>
-                <label
-                  htmlFor="setting-frequency-penalty"
-                  className="block text-sm font-medium text-gray-700 mb-1"
-                >
-                  Frequency penalty
-                </label>
+                <div className="mb-1 flex items-center gap-1.5">
+                  <label
+                    htmlFor="setting-frequency-penalty"
+                    className="text-sm font-medium text-gray-700"
+                  >
+                    Frequency penalty
+                  </label>
+                  <SettingTooltip
+                    label="Frequency penalty"
+                    text="Adjusts repetition based on how often a token has appeared. Positive values discourage repeated use."
+                  />
+                </div>
                 <input
                   id="setting-frequency-penalty"
                   type="number"
-                  disabled
-                  value=""
-                  placeholder="Unavailable"
-                  className="w-full rounded-lg border border-gray-200 bg-gray-100 px-3 py-2 text-gray-400 cursor-not-allowed"
+                  min={-2}
+                  max={2}
+                  step={0.1}
+                  value={settingsForm.frequencyPenalty}
+                  onChange={(e) =>
+                    setSettingsForm((prev) => ({ ...prev, frequencyPenalty: e.target.value }))
+                  }
+                  className="w-full rounded-lg border border-gray-300 px-3 py-2 text-gray-900 focus:outline-none focus:ring-2 focus:ring-blue-500"
                 />
-                <p className="mt-1 text-xs text-amber-600">
-                  Support not yet verified for this model.
-                </p>
+                <p className="mt-1 text-xs text-gray-500">Default 0. Range -2 to 2.</p>
               </div>
 
               <div>
-                <label
-                  htmlFor="setting-presence-penalty"
-                  className="block text-sm font-medium text-gray-700 mb-1"
-                >
-                  Presence penalty
-                </label>
+                <div className="mb-1 flex items-center gap-1.5">
+                  <label
+                    htmlFor="setting-presence-penalty"
+                    className="text-sm font-medium text-gray-700"
+                  >
+                    Presence penalty
+                  </label>
+                  <SettingTooltip
+                    label="Presence penalty"
+                    text="Adjusts repetition based on whether a token has appeared at all. Positive values encourage new tokens."
+                  />
+                </div>
                 <input
                   id="setting-presence-penalty"
                   type="number"
-                  disabled
-                  value=""
-                  placeholder="Unavailable"
-                  className="w-full rounded-lg border border-gray-200 bg-gray-100 px-3 py-2 text-gray-400 cursor-not-allowed"
+                  min={-2}
+                  max={2}
+                  step={0.1}
+                  value={settingsForm.presencePenalty}
+                  onChange={(e) =>
+                    setSettingsForm((prev) => ({ ...prev, presencePenalty: e.target.value }))
+                  }
+                  className="w-full rounded-lg border border-gray-300 px-3 py-2 text-gray-900 focus:outline-none focus:ring-2 focus:ring-blue-500"
                 />
-                <p className="mt-1 text-xs text-amber-600">
-                  Support not yet verified for this model.
-                </p>
+                <p className="mt-1 text-xs text-gray-500">Default 0. Range -2 to 2.</p>
               </div>
 
               <div>
-                <label
-                  htmlFor="setting-stop-sequences"
-                  className="block text-sm font-medium text-gray-700 mb-1"
-                >
-                  Stop sequences
-                </label>
+                <div className="mb-1 flex items-center gap-1.5">
+                  <label htmlFor="setting-stop-sequences" className="text-sm font-medium text-gray-700">
+                    Stop sequences
+                  </label>
+                  <SettingTooltip
+                    label="Stop sequences"
+                    text="Text patterns that tell generation when to stop. The matching sequence is normally omitted from the response."
+                  />
+                </div>
                 <input
                   id="setting-stop-sequences"
                   type="text"
@@ -952,12 +987,15 @@ export default function Chat() {
               </div>
 
               <div>
-                <label
-                  htmlFor="setting-seed"
-                  className="block text-sm font-medium text-gray-700 mb-1"
-                >
-                  Seed
-                </label>
+                <div className="mb-1 flex items-center gap-1.5">
+                  <label htmlFor="setting-seed" className="text-sm font-medium text-gray-700">
+                    Seed
+                  </label>
+                  <SettingTooltip
+                    label="Seed"
+                    text="Sets a starting value for random sampling. Reusing it may improve repeatability but does not guarantee identical responses."
+                  />
+                </div>
                 <input
                   id="setting-seed"
                   type="number"

@@ -1,26 +1,20 @@
-// Capability rules for Gemini generation-config settings, shared by the API
-// route and the UI so both enforce the same thing.
+// Validation for Gemini generation-config settings, shared by the API route
+// and the UI so both enforce the same thing.
 //
-// Evidence (checked against the official v1beta discovery document at
-// generativelanguage.googleapis.com/$discovery/rest?version=v1beta, and the
-// ai.google.dev docs pages for gemini-3.5-flash, gemini-3-flash-preview, and
-// gemini-3.1-flash-lite — not extrapolated from other API surfaces):
+// Editability and provider support are deliberately kept separate: every
+// field here is user-editable and range-checked by us, but whether a given
+// model actually accepts a given field is decided by the provider, not by
+// this code. If Gemini rejects a field for a specific model, that surfaces
+// as a sanitized error from the API route (see app/api/chat/route.ts) at
+// request time — we never pre-emptively block or silently drop a field the
+// user set, and we never retry automatically.
 //
-// - temperature: schema range [0.0, 2.0]. Google's Gemini 3 guide explicitly
-//   recommends keeping it at the default of 1.0 for all Gemini 3.x models.
-// - topP, seed, maxOutputTokens, stopSequences: documented with no per-model
-//   exclusion language.
-// - stopSequences: schema description states "up to 5" sequences.
-// - topK: the schema's own description says support is decided per model via
-//   that model's `Model.top_k` attribute (only readable through a live,
-//   keyed `models.get` call) — none of the three model doc pages state
-//   whether that attribute is present for them.
-// - frequencyPenalty, presencePenalty: no per-model exclusion language in the
-//   schema, but also no model page confirms support. Unverified either way.
-//
-// topK/frequencyPenalty/presencePenalty are therefore "unverified" rather
-// than "unsupported" — we don't have evidence either way — and are rejected
-// rather than silently forwarded.
+// Range sources: the official v1beta discovery document at
+// generativelanguage.googleapis.com/$discovery/rest?version=v1beta (temperature
+// [0.0, 2.0]; stopSequences "up to 5") plus this app's own product
+// requirements for topK, frequencyPenalty, presencePenalty, and
+// maxOutputTokens (capped at 65536, the documented output-token limit for
+// gemini-3.5-flash, gemini-3-flash-preview, and gemini-3.1-flash-lite).
 
 export type SettingKey =
   | "temperature"
@@ -31,30 +25,6 @@ export type SettingKey =
   | "presencePenalty"
   | "stopSequences"
   | "seed";
-
-export type SettingSupport = "supported" | "unverified";
-
-const BASE_CAPABILITY: Record<SettingKey, SettingSupport> = {
-  temperature: "supported",
-  topP: "supported",
-  topK: "unverified",
-  maxOutputTokens: "supported",
-  frequencyPenalty: "unverified",
-  presencePenalty: "unverified",
-  stopSequences: "supported",
-  seed: "supported",
-};
-
-// Keyed by model (even though every currently-available model resolves to
-// the same table today) so a future model with documented support can
-// override without changing any call site.
-export function getSettingSupport(_model: string, key: SettingKey): SettingSupport {
-  return BASE_CAPABILITY[key];
-}
-
-export const UNVERIFIED_SETTING_KEYS = (Object.keys(BASE_CAPABILITY) as SettingKey[]).filter(
-  (key) => BASE_CAPABILITY[key] === "unverified"
-);
 
 export const MAX_STOP_SEQUENCES = 5;
 export const MAX_OUTPUT_TOKENS_LIMIT = 65536;
@@ -73,7 +43,10 @@ export interface RawGenerationSettings {
 export interface ValidatedGenerationConfig {
   temperature?: number;
   topP?: number;
+  topK?: number;
   maxOutputTokens?: number;
+  frequencyPenalty?: number;
+  presencePenalty?: number;
   stopSequences?: string[];
   seed?: number;
 }
@@ -111,16 +84,6 @@ export function buildGenerationConfig(raw: unknown): ValidatedGenerationConfig {
   }
 
   const settings = raw as RawGenerationSettings;
-
-  for (const field of UNVERIFIED_SETTING_KEYS) {
-    if (isPresent(settings[field])) {
-      throw new SettingsValidationError(
-        field,
-        `"${field}" is not sent to the model: support is not verified for any available model.`
-      );
-    }
-  }
-
   const config: ValidatedGenerationConfig = {};
 
   if (isPresent(settings.temperature)) {
@@ -139,6 +102,14 @@ export function buildGenerationConfig(raw: unknown): ValidatedGenerationConfig {
     config.topP = topP;
   }
 
+  if (isPresent(settings.topK)) {
+    const topK = requireFiniteNumber("topK", settings.topK);
+    if (!Number.isInteger(topK) || topK < 1) {
+      throw new SettingsValidationError("topK", '"topK" must be a positive integer (1 or greater).');
+    }
+    config.topK = topK;
+  }
+
   if (isPresent(settings.maxOutputTokens)) {
     const maxOutputTokens = requireFiniteNumber("maxOutputTokens", settings.maxOutputTokens);
     if (
@@ -152,6 +123,28 @@ export function buildGenerationConfig(raw: unknown): ValidatedGenerationConfig {
       );
     }
     config.maxOutputTokens = maxOutputTokens;
+  }
+
+  if (isPresent(settings.frequencyPenalty)) {
+    const frequencyPenalty = requireFiniteNumber("frequencyPenalty", settings.frequencyPenalty);
+    if (frequencyPenalty < -2 || frequencyPenalty > 2) {
+      throw new SettingsValidationError(
+        "frequencyPenalty",
+        '"frequencyPenalty" must be between -2 and 2.'
+      );
+    }
+    config.frequencyPenalty = frequencyPenalty;
+  }
+
+  if (isPresent(settings.presencePenalty)) {
+    const presencePenalty = requireFiniteNumber("presencePenalty", settings.presencePenalty);
+    if (presencePenalty < -2 || presencePenalty > 2) {
+      throw new SettingsValidationError(
+        "presencePenalty",
+        '"presencePenalty" must be between -2 and 2.'
+      );
+    }
+    config.presencePenalty = presencePenalty;
   }
 
   if (isPresent(settings.seed)) {

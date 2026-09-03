@@ -179,6 +179,20 @@ export async function POST(request: NextRequest) {
         { status: 503 }
       );
     }
+    // Confirmed upstream 400 (Gemini rejecting the request itself, e.g. a
+    // generation setting it doesn't accept for this model): sanitized,
+    // actionable message with the real status. We never know here which
+    // field was rejected, so this doesn't guess — it tells the user what to
+    // try without forwarding the provider's raw payload.
+    if (error instanceof ApiError && error.status === 400) {
+      return NextResponse.json(
+        {
+          error:
+            "The selected model rejected one of the provided settings. Try adjusting or clearing a setting and sending again.",
+        },
+        { status: 400 }
+      );
+    }
     return NextResponse.json(
       { error: "Failed to generate response" },
       { status: 500 }
