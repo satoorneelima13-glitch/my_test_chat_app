@@ -13,9 +13,16 @@
 # testing
 /coverage
 /test-results
+/test-results*/
 /playwright-report
 /blob-report
 /playwright/.cache
+
+# backups
+*.backup
+
+# feedback data (kept locally, not committed)
+/data/feedback.csv
 
 # next.js
 /.next/

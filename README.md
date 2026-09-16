@@ -1,40 +1,51 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# Gemini Chat App
 
-## Architecture
+A Next.js chat application built on the Gemini API (`@google/genai`), with per-request model settings, streaming, and client/server-validated generation configuration.
 
-See [ARCHITECTURE.md](./ARCHITECTURE.md) for a diagram and request flow overview.
+## Features
 
-## Getting Started
+- **Model selection** — choose the Gemini model used for a request.
+- **Streaming responses** — assistant replies stream token-by-token over NDJSON; can be toggled on/off.
+- **Generation settings** — optional, per-request controls, each left unset by default (falling back to the model's own default) unless given a value:
+  - `temperature` (0.0–2.0)
+  - `topP` (0.0–1.0)
+  - `topK` (positive integer)
+  - `maxOutputTokens` (1–65536)
+  - `frequencyPenalty` (-2.0–2.0)
+  - `presencePenalty` (-2.0–2.0)
+  - `stopSequences` (up to 5 non-empty strings)
+  - `seed` (integer)
+- **Explanatory tooltips** — each setting has an inline tooltip describing what it does and its valid range.
+- **Client/server validation** — the settings form does client-side sanity checks before sending; the API route independently re-validates everything (see `app/lib/generationSettings.ts` and `app/lib/settingsForm.ts`) and rejects invalid input with a 400 and the offending field.
+- **Cancellation with partial-response preservation** — stopping a request mid-stream aborts both the client fetch and the upstream Gemini call, while keeping whatever text has already streamed in.
+- **Sanitized error handling** — upstream Gemini errors are never forwarded raw:
+  - `503` (model temporarily overloaded) → fixed, user-facing message, same status.
+  - `400` (model rejected a setting) → fixed, actionable message, same status.
+  - anything else → generic `500`.
 
-First, run the development server:
+## Setup
 
-```bash
-npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
-```
+1. Get an API key from [Google AI Studio](https://aistudio.google.com/apikey).
+2. Copy `.env.local.example` to `.env.local` and set:
+   ```bash
+   GOOGLE_GENAI_API_KEY=your_api_key_here
+   ```
+3. Install dependencies:
+   ```bash
+   npm install
+   ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+## Commands
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+| Command | Purpose |
+| --- | --- |
+| `npm run dev` | Start the development server at [http://localhost:3000](http://localhost:3000) |
+| `npx tsc --noEmit` | Type-check the project |
+| `npm run test:unit` | Run unit tests (`playwright.unit.config.ts`) |
+| `npm run test:ui` | Run UI tests (`playwright.config.ts`) |
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+Last verified: 28 unit tests passed, 29 UI tests passed, TypeScript clean.
 
-## Learn More
+## Limitations
 
-To learn more about Next.js, take a look at the following resources:
-
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
-
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
-
-## Deploy on Vercel
-
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
-
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+Not every optional setting is accepted by every Gemini model — support varies by model, and an unsupported setting surfaces as a sanitized 400 from the API at request time rather than being blocked client-side.
