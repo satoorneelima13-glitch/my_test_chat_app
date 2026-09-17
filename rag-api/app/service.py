@@ -68,6 +68,31 @@ def _as_dict(value: Any) -> dict[str, Any]:
     raise TypeError("Pinecone returned an unsupported response type")
 
 
+def extract_response_text(content: Any) -> str:
+    """Return only user-visible text from Gemini/LangChain response content."""
+
+    if isinstance(content, str):
+        return content.strip()
+
+    if isinstance(content, list):
+        text_parts: list[str] = []
+        for block in content:
+            if isinstance(block, str):
+                text_parts.append(block)
+                continue
+            if isinstance(block, dict):
+                text = block.get("text")
+            else:
+                text = getattr(block, "text", None)
+            if isinstance(text, str):
+                text_parts.append(text)
+        answer = "\n".join(part.strip() for part in text_parts if part.strip())
+        if answer:
+            return answer
+
+    raise ValueError("Gemini returned no readable answer text.")
+
+
 class RagService:
     def __init__(self, settings: Settings):
         self.settings = settings
@@ -178,5 +203,5 @@ class RagService:
             context="\n\n---\n\n".join(context_parts), question=question
         )
         response = self.llm.invoke(messages)
-        answer = response.content if isinstance(response.content, str) else str(response.content)
+        answer = extract_response_text(response.content)
         return QuestionResponse(answer=answer, index_name=index_name, sources=sources)

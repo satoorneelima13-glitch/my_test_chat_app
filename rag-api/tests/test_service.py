@@ -3,7 +3,7 @@ from unittest.mock import patch
 
 from langchain_core.documents import Document
 
-from app.service import RagService, load_pdf_pages, make_index_name
+from app.service import RagService, extract_response_text, load_pdf_pages, make_index_name
 
 
 def test_index_name_is_unique_safe_and_within_pinecone_limit() -> None:
@@ -41,3 +41,15 @@ def test_wait_for_records_accepts_object_stats() -> None:
             return Stats()
 
     RagService._wait_until_records_indexed(Index(), expected=80, timeout_seconds=1)
+
+
+def test_extract_response_text_supports_gemini_structured_content() -> None:
+    content = [
+        {
+            "type": "text",
+            "text": "Apple revenue answer.",
+            "extras": {"signature": "must-not-be-displayed"},
+        }
+    ]
+
+    assert extract_response_text(content) == "Apple revenue answer."

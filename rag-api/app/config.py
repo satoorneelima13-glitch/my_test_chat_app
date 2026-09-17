@@ -9,7 +9,7 @@ class Settings(BaseSettings):
 
     pinecone_api_key: str = Field(alias="PINECONE_API_KEY")
     google_genai_api_key: str = Field(alias="GOOGLE_GENAI_API_KEY")
-    rag_chat_model: str = Field(default="gemini-2.5-flash", alias="RAG_CHAT_MODEL")
+    rag_chat_model: str = Field(default="gemini-3.6-flash", alias="RAG_CHAT_MODEL")
     pinecone_cloud: str = Field(default="aws", alias="PINECONE_CLOUD")
     pinecone_region: str = Field(default="us-east-1", alias="PINECONE_REGION")
     pinecone_embed_model: str = Field(
