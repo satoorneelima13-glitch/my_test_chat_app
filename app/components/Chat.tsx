@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 import {
   Copy,
+  Database,
   HelpCircle,
   Menu,
   MessageCircle,
@@ -24,6 +25,7 @@ import { RawGenerationSettings } from "../lib/generationSettings";
 import { drainStreamLines, StreamProtocolError } from "../lib/streamProtocol";
 import { TEST_SYNTHETIC_STREAM_MODEL } from "../lib/streamTestFixture";
 import SettingTooltip from "./SettingTooltip";
+import DocumentQa from "./DocumentQa";
 
 const isAbortError = (error: unknown): boolean =>
   error instanceof DOMException && error.name === "AbortError";
@@ -53,6 +55,7 @@ export default function Chat() {
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [settingsForm, setSettingsForm] = useState<SettingsFormState>(DEFAULT_SETTINGS_FORM);
   const [streamingEnabled, setStreamingEnabled] = useState(false);
+  const [documentQaOpen, setDocumentQaOpen] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const activeRequestRef = useRef(0);
   const abortControllerRef = useRef<AbortController | null>(null);
@@ -529,6 +532,13 @@ export default function Chat() {
         </div>
 
         <div className="p-3 border-t border-gray-200 space-y-2">
+          <button
+            onClick={() => setDocumentQaOpen(true)}
+            className="w-full text-left flex items-center gap-3 px-3 py-2 rounded-lg hover:bg-gray-100 text-gray-600 text-sm transition-colors"
+          >
+            <Database size={18} />
+            PDF Q&amp;A
+          </button>
           <button className="w-full text-left flex items-center gap-3 px-3 py-2 rounded-lg hover:bg-gray-100 text-gray-600 text-sm transition-colors">
             <HelpCircle size={18} />
             Help & FAQ
@@ -760,6 +770,8 @@ export default function Chat() {
           </div>
         </div>
       </div>
+
+      {documentQaOpen && <DocumentQa onClose={() => setDocumentQaOpen(false)} />}
 
       {settingsOpen && (
         <div

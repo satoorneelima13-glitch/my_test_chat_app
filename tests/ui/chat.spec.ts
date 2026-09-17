@@ -168,4 +168,50 @@ test.describe("Chat app (mocked API)", () => {
     await page.getByRole("button", { name: "Edit prompt" }).click();
     await expect(page.getByPlaceholder("Message Gemini")).toHaveValue("Hi");
   });
+
+  test("uploads a PDF into a new index and asks a grounded question", async ({ page }) => {
+    await page.route("**/api/rag/upload", async (route) => {
+      await route.fulfill({
+        status: 201,
+        contentType: "application/json",
+        body: JSON.stringify({
+          index_name: "rag-apple-10-k-test1234",
+          filename: "apple-10-k.pdf",
+          pages_indexed: 80,
+          message: "PDF indexed successfully.",
+        }),
+      });
+    });
+    await page.route("**/api/rag/query", async (route) => {
+      expect(route.request().postDataJSON()).toEqual({
+        index_name: "rag-apple-10-k-test1234",
+        question: "Where is Apple headquarters?",
+      });
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({
+          answer: "One Apple Park Way, Cupertino, California 95014.",
+          index_name: "rag-apple-10-k-test1234",
+          sources: [{ filename: "apple-10-k.pdf", page_number: 4, score: 0.91 }],
+        }),
+      });
+    });
+
+    await page.goto("/");
+    await page.getByRole("button", { name: "PDF Q&A" }).click();
+    await page.getByLabel("PDF file").setInputFiles({
+      name: "apple-10-k.pdf",
+      mimeType: "application/pdf",
+      buffer: Buffer.from("%PDF-1.7 mocked PDF"),
+    });
+    await page.getByRole("button", { name: "Create index" }).click();
+
+    await expect(page.getByText(/80 pages indexed/i)).toBeVisible();
+    await page.getByLabel("2. Ask a question").fill("Where is Apple headquarters?");
+    await page.getByRole("button", { name: "Ask PDF" }).click();
+
+    await expect(page.getByText("One Apple Park Way, Cupertino, California 95014.")).toBeVisible();
+    await expect(page.getByText("apple-10-k.pdf, page 4")).toBeVisible();
+  });
 });

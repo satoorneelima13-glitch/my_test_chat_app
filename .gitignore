@@ -2,6 +2,10 @@
 
 # dependencies
 /node_modules
+**/.venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
 /.pnp
 .pnp.*
 .yarn/*
@@ -44,6 +48,7 @@ yarn-error.log*
 # env files (can opt-in for committing if needed)
 .env*
 !.env.local.example
+!rag-api/.env.example
 
 # vercel
 .vercel

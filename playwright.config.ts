@@ -22,7 +22,7 @@ export default defineConfig({
     // A dev server for this project is commonly already running on 3000;
     // Next.js refuses to start a second instance for the same project dir
     // even on a different port, so we target 3000 and reuse it if present.
-    command: "npm run dev",
+    command: "npm run dev -- --hostname 127.0.0.1",
     url: "http://localhost:3000",
     reuseExistingServer: true,
     timeout: 60_000,
