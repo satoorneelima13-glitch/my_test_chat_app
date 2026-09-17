@@ -565,7 +565,7 @@ export default function Chat() {
                 <Menu size={20} className="text-gray-700" />
               </button>
               <h1 className="text-2xl font-semibold text-gray-900 whitespace-nowrap">
-                My Gemini App
+              My Personal AI Assistant
               </h1>
             </div>
             <label className="flex items-center gap-2 text-sm text-gray-700">
