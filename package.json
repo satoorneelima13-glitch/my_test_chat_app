@@ -5,7 +5,9 @@
   "scripts": {
     "dev": "next dev",
     "build": "next build",
-    "start": "next start"
+    "start": "next start",
+    "test:unit": "playwright test --config=playwright.unit.config.ts",
+    "test:ui": "playwright test --config=playwright.config.ts"
   },
   "dependencies": {
     "@google/genai": "^2.17.1",

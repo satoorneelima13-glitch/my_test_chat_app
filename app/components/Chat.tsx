@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 import {
   Copy,
+  Database,
   HelpCircle,
   Menu,
   MessageCircle,
@@ -12,7 +13,22 @@ import {
   Settings,
   ThumbsDown,
   ThumbsUp,
+  X,
 } from "lucide-react";
+import { DEFAULT_MODEL, MODELS } from "../lib/models";
+import {
+  DEFAULT_SETTINGS_FORM,
+  parseSettingsForm,
+  SettingsFormState,
+} from "../lib/settingsForm";
+import { RawGenerationSettings } from "../lib/generationSettings";
+import { drainStreamLines, StreamProtocolError } from "../lib/streamProtocol";
+import { TEST_SYNTHETIC_STREAM_MODEL } from "../lib/streamTestFixture";
+import SettingTooltip from "./SettingTooltip";
+import DocumentQa from "./DocumentQa";
+
+const isAbortError = (error: unknown): boolean =>
+  error instanceof DOMException && error.name === "AbortError";
 
 type Feedback = "positive" | "negative";
 
@@ -28,21 +44,21 @@ interface Conversation {
   messages: Message[];
 }
 
-const models = [
-  { value: "gemini-3.5-flash", label: "Gemini 3.5 Flash" },
-  { value: "gemini-3-flash-preview", label: "Gemini 3 Flash" },
-  { value: "gemini-3.1-flash-lite", label: "Gemini 3.1 Flash-Lite" },
-];
-
 export default function Chat() {
   const [conversations, setConversations] = useState<Conversation[]>([]);
   const [currentConvId, setCurrentConvId] = useState<string | null>(null);
   const [input, setInput] = useState("");
   const [loading, setLoading] = useState(false);
   const [sidebarOpen, setSidebarOpen] = useState(true);
-  const [selectedModel, setSelectedModel] = useState(models[0].value);
+  const [selectedModel, setSelectedModel] = useState(DEFAULT_MODEL);
   const [status, setStatus] = useState("");
+  const [settingsOpen, setSettingsOpen] = useState(false);
+  const [settingsForm, setSettingsForm] = useState<SettingsFormState>(DEFAULT_SETTINGS_FORM);
+  const [streamingEnabled, setStreamingEnabled] = useState(false);
+  const [documentQaOpen, setDocumentQaOpen] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
+  const activeRequestRef = useRef(0);
+  const abortControllerRef = useRef<AbortController | null>(null);
 
   const currentConv = conversations.find((c) => c.id === currentConvId);
   const messages = currentConv?.messages || [];
@@ -62,11 +78,21 @@ export default function Chat() {
     setStatus("");
   };
 
-  const requestAnswer = async (chatMessages: Message[]) => {
+  const requestAnswer = async (
+    chatMessages: Message[],
+    settings: RawGenerationSettings,
+    signal: AbortSignal
+  ) => {
     const response = await fetch("/api/chat", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ messages: chatMessages, model: selectedModel }),
+      body: JSON.stringify({
+        messages: chatMessages,
+        model: selectedModel,
+        settings,
+        stream: false,
+      }),
+      signal,
     });
 
     if (!response.ok) {
@@ -78,10 +104,112 @@ export default function Chat() {
     return data.text as string;
   };
 
+  // Reads the /api/chat NDJSON stream, calling onChunk with the
+  // accumulated-so-far text after every chunk event. Resolves once a "done"
+  // event arrives; throws StreamProtocolError (carrying whatever text had
+  // accumulated) on a malformed event or a connection that ends without
+  // ever sending "done", so the caller can keep partial output instead of
+  // discarding it.
+  const requestAnswerStreaming = async (
+    chatMessages: Message[],
+    settings: RawGenerationSettings,
+    onChunk: (textSoFar: string) => void,
+    signal: AbortSignal
+  ): Promise<string> => {
+    const response = await fetch("/api/chat", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        messages: chatMessages,
+        model: selectedModel,
+        settings,
+        stream: true,
+      }),
+      signal,
+    });
+
+    if (!response.ok || !response.body) {
+      const data = await response.json().catch(() => ({}));
+      throw new Error(data.error || "Failed to fetch response");
+    }
+
+    const reader = response.body.getReader();
+    // { stream: true } lets the decoder hold back an incomplete multi-byte
+    // UTF-8 sequence split across two reads instead of corrupting it.
+    const decoder = new TextDecoder();
+    let buffer = "";
+    let accumulated = "";
+    let receivedDone = false;
+
+    try {
+      while (true) {
+        const { value, done } = await reader.read();
+        if (done) break;
+
+        buffer += decoder.decode(value, { stream: true });
+        const { events, remainder, malformedLine } = drainStreamLines(buffer);
+        buffer = remainder;
+
+        for (const event of events) {
+          if (event.type === "chunk") {
+            accumulated += event.text;
+            onChunk(accumulated);
+          } else if (event.type === "done") {
+            receivedDone = true;
+          } else if (event.type === "error") {
+            throw new Error(event.message);
+          }
+        }
+
+        if (malformedLine !== null) {
+          throw new StreamProtocolError(
+            "Received a malformed response from the server.",
+            accumulated
+          );
+        }
+        if (receivedDone) break;
+      }
+    } finally {
+      reader.cancel().catch(() => {});
+    }
+
+    if (!receivedDone) {
+      throw new StreamProtocolError(
+        "The response ended unexpectedly before completing.",
+        accumulated
+      );
+    }
+
+    return accumulated;
+  };
+
+  const setMessageContent = (convId: string, messageIndex: number, content: string) => {
+    setConversations((prev) =>
+      prev.map((c) =>
+        c.id === convId
+          ? {
+              ...c,
+              messages: c.messages.map((m, i) => (i === messageIndex ? { ...m, content } : m)),
+            }
+          : c
+      )
+    );
+  };
+
+  const stopGeneration = () => {
+    abortControllerRef.current?.abort();
+  };
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     const prompt = input.trim();
     if (!prompt || loading) return;
+
+    const { settings, error: settingsError } = parseSettingsForm(settingsForm);
+    if (settingsError) {
+      setStatus(settingsError);
+      return;
+    }
 
     let convId = currentConvId;
     let existingMessages = messages;
@@ -95,57 +223,118 @@ export default function Chat() {
         { id: convId!, title: "New chat", messages: [] },
       ]);
     }
+    const finalConvId = convId;
 
     const userMessage: Message = { role: "user", content: prompt };
     const requestMessages = [...existingMessages, userMessage];
+    const title =
+      existingMessages.length === 0
+        ? prompt.substring(0, 30) + (prompt.length > 30 ? "..." : "")
+        : undefined;
 
-    setConversations((prev) =>
-      prev.map((c) =>
-        c.id === convId ? { ...c, messages: requestMessages } : c
-      )
-    );
+    const token = ++activeRequestRef.current;
+    const isCurrent = () => activeRequestRef.current === token;
+    const controller = new AbortController();
+    abortControllerRef.current = controller;
+
     setInput("");
     setLoading(true);
     setStatus("");
 
+    if (streamingEnabled) {
+      const assistantIndex = requestMessages.length;
+      setConversations((prev) =>
+        prev.map((c) =>
+          c.id === finalConvId
+            ? {
+                ...c,
+                title: title ?? c.title,
+                messages: [...requestMessages, { role: "assistant", content: "" }],
+              }
+            : c
+        )
+      );
+
+      try {
+        await requestAnswerStreaming(
+          requestMessages,
+          settings,
+          (textSoFar) => {
+            if (isCurrent()) setMessageContent(finalConvId, assistantIndex, textSoFar);
+          },
+          controller.signal
+        );
+        if (isCurrent()) setStatus("");
+      } catch (error) {
+        if (!isCurrent()) return;
+        if (isAbortError(error)) {
+          setStatus("Generation stopped.");
+        } else {
+          console.error("Error:", error);
+          const message = error instanceof Error ? error.message : "Response could not be completed.";
+          setStatus(message);
+        }
+      } finally {
+        if (isCurrent()) {
+          setLoading(false);
+          abortControllerRef.current = null;
+        }
+      }
+      return;
+    }
+
+    setConversations((prev) =>
+      prev.map((c) =>
+        c.id === finalConvId ? { ...c, messages: requestMessages } : c
+      )
+    );
+
     try {
-      const text = await requestAnswer(requestMessages);
+      const text = await requestAnswer(requestMessages, settings, controller.signal);
+      if (!isCurrent()) return;
       const assistantMessage: Message = { role: "assistant", content: text };
 
       setConversations((prev) =>
         prev.map((c) =>
-          c.id === convId
+          c.id === finalConvId
             ? {
                 ...c,
-                title:
-                  existingMessages.length === 0
-                    ? prompt.substring(0, 30) + (prompt.length > 30 ? "..." : "")
-                    : c.title,
+                title: title ?? c.title,
                 messages: [...requestMessages, assistantMessage],
               }
             : c
         )
       );
     } catch (error) {
-      console.error("Error:", error);
-      setConversations((prev) =>
-        prev.map((c) =>
-          c.id === convId
-            ? {
-                ...c,
-                messages: [
-                  ...requestMessages,
-                  {
-                    role: "assistant",
-                    content: "Sorry, I encountered an error. Please try again.",
-                  },
-                ],
-              }
-            : c
-        )
-      );
+      if (!isCurrent()) return;
+      if (isAbortError(error)) {
+        setStatus("Generation stopped.");
+      } else {
+        console.error("Error:", error);
+        const message =
+          error instanceof Error ? error.message : "Sorry, I encountered an error. Please try again.";
+        setConversations((prev) =>
+          prev.map((c) =>
+            c.id === finalConvId
+              ? {
+                  ...c,
+                  messages: [
+                    ...requestMessages,
+                    {
+                      role: "assistant",
+                      content: message,
+                    },
+                  ],
+                }
+              : c
+          )
+        );
+      }
     } finally {
-      setLoading(false);
+      if (isCurrent()) {
+        setLoading(false);
+        abortControllerRef.current = null;
+      }
     }
   };
 
@@ -213,15 +402,60 @@ export default function Chat() {
       .lastIndexOf("user");
     if (promptIndex < 0) return;
 
+    const { settings, error: settingsError } = parseSettingsForm(settingsForm);
+    if (settingsError) {
+      setStatus(settingsError);
+      return;
+    }
+
     const requestMessages = messages.slice(0, promptIndex + 1);
+    const convId = currentConvId;
+
+    const token = ++activeRequestRef.current;
+    const isCurrent = () => activeRequestRef.current === token;
+    const controller = new AbortController();
+    abortControllerRef.current = controller;
+
     setLoading(true);
-    setStatus("Regenerating response...");
+    setStatus(streamingEnabled ? "Generating..." : "Regenerating response...");
+
+    if (streamingEnabled) {
+      setMessageContent(convId, messageIndex, "");
+      try {
+        await requestAnswerStreaming(
+          requestMessages,
+          settings,
+          (textSoFar) => {
+            if (isCurrent()) setMessageContent(convId, messageIndex, textSoFar);
+          },
+          controller.signal
+        );
+        if (isCurrent()) setStatus("Response regenerated");
+      } catch (error) {
+        if (!isCurrent()) return;
+        if (isAbortError(error)) {
+          setStatus("Generation stopped.");
+        } else {
+          console.error("Regeneration error:", error);
+          const message =
+            error instanceof Error ? error.message : "Response could not be regenerated";
+          setStatus(message);
+        }
+      } finally {
+        if (isCurrent()) {
+          setLoading(false);
+          abortControllerRef.current = null;
+        }
+      }
+      return;
+    }
 
     try {
-      const text = await requestAnswer(requestMessages);
+      const text = await requestAnswer(requestMessages, settings, controller.signal);
+      if (!isCurrent()) return;
       setConversations((prev) =>
         prev.map((conversation) =>
-          conversation.id === currentConvId
+          conversation.id === convId
             ? {
                 ...conversation,
                 messages: conversation.messages.map((message, index) =>
@@ -235,10 +469,20 @@ export default function Chat() {
       );
       setStatus("Response regenerated");
     } catch (error) {
-      console.error("Regeneration error:", error);
-      setStatus("Response could not be regenerated");
+      if (!isCurrent()) return;
+      if (isAbortError(error)) {
+        setStatus("Generation stopped.");
+      } else {
+        console.error("Regeneration error:", error);
+        const message =
+          error instanceof Error ? error.message : "Response could not be regenerated";
+        setStatus(message);
+      }
     } finally {
-      setLoading(false);
+      if (isCurrent()) {
+        setLoading(false);
+        abortControllerRef.current = null;
+      }
     }
   };
 
@@ -288,11 +532,21 @@ export default function Chat() {
         </div>
 
         <div className="p-3 border-t border-gray-200 space-y-2">
+          <button
+            onClick={() => setDocumentQaOpen(true)}
+            className="w-full text-left flex items-center gap-3 px-3 py-2 rounded-lg hover:bg-gray-100 text-gray-600 text-sm transition-colors"
+          >
+            <Database size={18} />
+            PDF Q&amp;A
+          </button>
           <button className="w-full text-left flex items-center gap-3 px-3 py-2 rounded-lg hover:bg-gray-100 text-gray-600 text-sm transition-colors">
             <HelpCircle size={18} />
             Help & FAQ
           </button>
-          <button className="w-full text-left flex items-center gap-3 px-3 py-2 rounded-lg hover:bg-gray-100 text-gray-600 text-sm transition-colors">
+          <button
+            onClick={() => setSettingsOpen(true)}
+            className="w-full text-left flex items-center gap-3 px-3 py-2 rounded-lg hover:bg-gray-100 text-gray-600 text-sm transition-colors"
+          >
             <Settings size={18} />
             Settings
           </button>
@@ -323,11 +577,16 @@ export default function Chat() {
                 className="rounded-lg border border-gray-300 bg-white px-3 py-2 text-gray-900 focus:outline-none focus:ring-2 focus:ring-blue-500"
                 aria-label="Select Gemini model"
               >
-                {models.map((model) => (
+                {MODELS.map((model) => (
                   <option key={model.value} value={model.value}>
                     {model.label}
                   </option>
                 ))}
+                {process.env.NODE_ENV !== "production" && (
+                  <option value={TEST_SYNTHETIC_STREAM_MODEL}>
+                    Test: synthetic stream (dev only)
+                  </option>
+                )}
               </select>
             </label>
           </div>
@@ -490,17 +749,299 @@ export default function Chat() {
                 disabled={loading}
                 className="flex-1 px-4 py-3 border border-gray-300 rounded-full focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent placeholder-gray-500 disabled:bg-gray-50 disabled:cursor-not-allowed transition-all bg-white text-gray-900"
               />
-              <button
-                type="submit"
-                disabled={loading || !input.trim()}
-                className="px-6 py-3 bg-blue-600 text-white rounded-full hover:bg-blue-700 disabled:bg-gray-300 disabled:cursor-not-allowed transition-colors font-medium"
-              >
-                Send
-              </button>
+              {loading ? (
+                <button
+                  type="button"
+                  onClick={stopGeneration}
+                  className="px-6 py-3 bg-red-600 text-white rounded-full hover:bg-red-700 transition-colors font-medium"
+                >
+                  Stop
+                </button>
+              ) : (
+                <button
+                  type="submit"
+                  disabled={!input.trim()}
+                  className="px-6 py-3 bg-blue-600 text-white rounded-full hover:bg-blue-700 disabled:bg-gray-300 disabled:cursor-not-allowed transition-colors font-medium"
+                >
+                  Send
+                </button>
+              )}
             </form>
           </div>
         </div>
       </div>
+
+      {documentQaOpen && <DocumentQa onClose={() => setDocumentQaOpen(false)} />}
+
+      {settingsOpen && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/30 p-4"
+          role="dialog"
+          aria-modal="true"
+          aria-label="Model settings"
+        >
+          <div className="w-full max-w-lg rounded-xl bg-white p-6 shadow-xl max-h-[85vh] overflow-y-auto">
+            <div className="flex items-center justify-between mb-4">
+              <h2 className="text-lg font-semibold text-gray-900">Model settings</h2>
+              <button
+                onClick={() => setSettingsOpen(false)}
+                aria-label="Close settings"
+                className="p-1.5 rounded hover:bg-gray-100 text-gray-500"
+              >
+                <X size={18} />
+              </button>
+            </div>
+
+            <div className="space-y-4">
+              <div className="flex items-center justify-between rounded-lg border border-gray-200 px-3 py-2">
+                <div>
+                  <label htmlFor="setting-streaming" className="text-sm font-medium text-gray-700">
+                    Stream responses
+                  </label>
+                  <p className="text-xs text-gray-500">
+                    Show the reply as it's generated instead of waiting for the full response.
+                  </p>
+                </div>
+                <input
+                  id="setting-streaming"
+                  type="checkbox"
+                  checked={streamingEnabled}
+                  onChange={(e) => setStreamingEnabled(e.target.checked)}
+                  className="h-5 w-5 rounded border-gray-300 text-blue-600 focus:ring-blue-500"
+                />
+              </div>
+
+              <div>
+                <div className="mb-1 flex items-center gap-1.5">
+                  <label htmlFor="setting-temperature" className="text-sm font-medium text-gray-700">
+                    Temperature
+                  </label>
+                  <SettingTooltip
+                    label="Temperature"
+                    text="Controls randomness. Lower values usually give more predictable responses; higher values give more varied responses."
+                  />
+                </div>
+                <input
+                  id="setting-temperature"
+                  type="number"
+                  min={0}
+                  max={2}
+                  step={0.1}
+                  value={settingsForm.temperature}
+                  onChange={(e) =>
+                    setSettingsForm((prev) => ({ ...prev, temperature: e.target.value }))
+                  }
+                  className="w-full rounded-lg border border-gray-300 px-3 py-2 text-gray-900 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                />
+                <p className="mt-1 text-xs text-gray-500">
+                  Default 0.5. Range 0–2. Google's Gemini 3 guidance recommends keeping this at
+                  1.0 for these models — lower values may cause looping or degraded reasoning.
+                </p>
+              </div>
+
+              <div>
+                <div className="mb-1 flex items-center gap-1.5">
+                  <label htmlFor="setting-top-p" className="text-sm font-medium text-gray-700">
+                    Top P
+                  </label>
+                  <SettingTooltip
+                    label="Top P"
+                    text="Chooses from the smallest set of likely tokens whose combined probability reaches this value."
+                  />
+                </div>
+                <input
+                  id="setting-top-p"
+                  type="number"
+                  min={0}
+                  max={1}
+                  step={0.05}
+                  value={settingsForm.topP}
+                  onChange={(e) =>
+                    setSettingsForm((prev) => ({ ...prev, topP: e.target.value }))
+                  }
+                  placeholder="Model default"
+                  className="w-full rounded-lg border border-gray-300 px-3 py-2 text-gray-900 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                />
+                <p className="mt-1 text-xs text-gray-500">Optional. Range 0–1.</p>
+              </div>
+
+              <div>
+                <div className="mb-1 flex items-center gap-1.5">
+                  <label htmlFor="setting-top-k" className="text-sm font-medium text-gray-700">
+                    Top K
+                  </label>
+                  <SettingTooltip
+                    label="Top K"
+                    text="Limits each next-token choice to the K most likely candidates. Lower values narrow the choices."
+                  />
+                </div>
+                <input
+                  id="setting-top-k"
+                  type="number"
+                  min={1}
+                  step={1}
+                  value={settingsForm.topK}
+                  onChange={(e) => setSettingsForm((prev) => ({ ...prev, topK: e.target.value }))}
+                  placeholder="Model default"
+                  className="w-full rounded-lg border border-gray-300 px-3 py-2 text-gray-900 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                />
+                <p className="mt-1 text-xs text-gray-500">Optional. Positive integer (1 or greater).</p>
+              </div>
+
+              <div>
+                <div className="mb-1 flex items-center gap-1.5">
+                  <label
+                    htmlFor="setting-max-output-tokens"
+                    className="text-sm font-medium text-gray-700"
+                  >
+                    Maximum output tokens
+                  </label>
+                  <SettingTooltip
+                    label="Maximum output tokens"
+                    text="Caps the number of tokens generated. Tokens are pieces of words, not a word count."
+                  />
+                </div>
+                <input
+                  id="setting-max-output-tokens"
+                  type="number"
+                  min={1}
+                  max={65536}
+                  step={1}
+                  value={settingsForm.maxOutputTokens}
+                  onChange={(e) =>
+                    setSettingsForm((prev) => ({ ...prev, maxOutputTokens: e.target.value }))
+                  }
+                  placeholder="Model default"
+                  className="w-full rounded-lg border border-gray-300 px-3 py-2 text-gray-900 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                />
+                <p className="mt-1 text-xs text-gray-500">Optional. Up to 65,536.</p>
+              </div>
+
+              <div>
+                <div className="mb-1 flex items-center gap-1.5">
+                  <label
+                    htmlFor="setting-frequency-penalty"
+                    className="text-sm font-medium text-gray-700"
+                  >
+                    Frequency penalty
+                  </label>
+                  <SettingTooltip
+                    label="Frequency penalty"
+                    text="Adjusts repetition based on how often a token has appeared. Positive values discourage repeated use."
+                  />
+                </div>
+                <input
+                  id="setting-frequency-penalty"
+                  type="number"
+                  min={-2}
+                  max={2}
+                  step={0.1}
+                  value={settingsForm.frequencyPenalty}
+                  onChange={(e) =>
+                    setSettingsForm((prev) => ({ ...prev, frequencyPenalty: e.target.value }))
+                  }
+                  className="w-full rounded-lg border border-gray-300 px-3 py-2 text-gray-900 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                />
+                <p className="mt-1 text-xs text-gray-500">Default 0. Range -2 to 2.</p>
+              </div>
+
+              <div>
+                <div className="mb-1 flex items-center gap-1.5">
+                  <label
+                    htmlFor="setting-presence-penalty"
+                    className="text-sm font-medium text-gray-700"
+                  >
+                    Presence penalty
+                  </label>
+                  <SettingTooltip
+                    label="Presence penalty"
+                    text="Adjusts repetition based on whether a token has appeared at all. Positive values encourage new tokens."
+                  />
+                </div>
+                <input
+                  id="setting-presence-penalty"
+                  type="number"
+                  min={-2}
+                  max={2}
+                  step={0.1}
+                  value={settingsForm.presencePenalty}
+                  onChange={(e) =>
+                    setSettingsForm((prev) => ({ ...prev, presencePenalty: e.target.value }))
+                  }
+                  className="w-full rounded-lg border border-gray-300 px-3 py-2 text-gray-900 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                />
+                <p className="mt-1 text-xs text-gray-500">Default 0. Range -2 to 2.</p>
+              </div>
+
+              <div>
+                <div className="mb-1 flex items-center gap-1.5">
+                  <label htmlFor="setting-stop-sequences" className="text-sm font-medium text-gray-700">
+                    Stop sequences
+                  </label>
+                  <SettingTooltip
+                    label="Stop sequences"
+                    text="Text patterns that tell generation when to stop. The matching sequence is normally omitted from the response."
+                  />
+                </div>
+                <input
+                  id="setting-stop-sequences"
+                  type="text"
+                  value={settingsForm.stopSequences}
+                  onChange={(e) =>
+                    setSettingsForm((prev) => ({ ...prev, stopSequences: e.target.value }))
+                  }
+                  placeholder="Comma-separated, up to 5"
+                  className="w-full rounded-lg border border-gray-300 px-3 py-2 text-gray-900 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                />
+                <p className="mt-1 text-xs text-gray-500">
+                  Up to 5 sequences. Generation stops at the first match.
+                </p>
+              </div>
+
+              <div>
+                <div className="mb-1 flex items-center gap-1.5">
+                  <label htmlFor="setting-seed" className="text-sm font-medium text-gray-700">
+                    Seed
+                  </label>
+                  <SettingTooltip
+                    label="Seed"
+                    text="Sets a starting value for random sampling. Reusing it may improve repeatability but does not guarantee identical responses."
+                  />
+                </div>
+                <input
+                  id="setting-seed"
+                  type="number"
+                  step={1}
+                  value={settingsForm.seed}
+                  onChange={(e) =>
+                    setSettingsForm((prev) => ({ ...prev, seed: e.target.value }))
+                  }
+                  placeholder="Random"
+                  className="w-full rounded-lg border border-gray-300 px-3 py-2 text-gray-900 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                />
+                <p className="mt-1 text-xs text-gray-500">
+                  Optional integer. Best-effort deterministic output.
+                </p>
+              </div>
+            </div>
+
+            <div className="mt-6 flex justify-between">
+              <button
+                onClick={() => setSettingsForm(DEFAULT_SETTINGS_FORM)}
+                className="px-4 py-2 text-sm rounded-lg border border-gray-300 text-gray-700 hover:bg-gray-50"
+              >
+                Reset to defaults
+              </button>
+              <button
+                onClick={() => setSettingsOpen(false)}
+                className="px-4 py-2 text-sm rounded-lg bg-blue-600 text-white hover:bg-blue-700"
+              >
+                Done
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
