@@ -18,8 +18,25 @@ flowchart TD
     P -->|Relevant pages| F
     F -->|LangChain context prompt| G[Gemini]
     G -->|Grounded answer| F
-    F -->|Answer and source pages| N
+    F -->|Answer, source pages, evaluation_id| N
+    U -->|Evaluate this answer| N
+    N -->|evaluation_id| F
+    F -->|Stored question/context/answer| J[Gemini judge]
+    J -->|correct or incorrect| F
+    F -->|Verdict| N
 ```
+
+## Week 6: live answer evaluation
+
+Every `/query` answer can be checked with an **"Evaluate this answer"** button in the PDF Q&A dialog. The judge (Gemini, `JUDGE_MODEL`) evaluates the exact answer already on screen against the exact retrieved page text that produced it — it never re-retrieves pages or regenerates the answer.
+
+How it works:
+
+- `RagService.answer()` stores `{question, context, answer}` server-side in an in-memory `EvaluationStore` (`rag-api/app/evaluation_store.py`, TTL + size-capped) and returns an opaque `evaluation_id` alongside the normal `/query` response. The reference page text never reaches the browser.
+- Clicking the button calls the Next.js proxy `POST /api/rag/evaluate` → FastAPI `POST /evaluate`, which looks up the stored record by id and judges it with the shared `judge_answer()` helper in `rag-api/app/evaluation.py` (also used by the batch script `run_evaluations.py`, which still generates its own answers with `INITIAL_ANSWER_MODEL` / GPT-4o-mini before judging them).
+- The response is only ever `{"verdict": "correct"}` or `{"verdict": "incorrect"}`.
+- Evaluation is entirely optional: asking a question never calls the judge, so a judge outage cannot block or slow down normal Q&A. The button surfaces four states of its own: loading, a verdict (correct/incorrect), **quota exceeded** (HTTP 429), **temporarily unavailable** (HTTP 503, after the judge's own retry attempts are exhausted), and a generic error for anything else.
+- The evaluation store is in-memory per FastAPI process — evaluation ids do not survive a server restart and are not shared across multiple workers/instances.
 
 ## RAG design
 
@@ -98,7 +115,7 @@ pip install -r requirements.txt
 cp .env.example .env
 ```
 
-Set real values for `PINECONE_API_KEY` and `GOOGLE_GENAI_API_KEY` in `rag-api/.env`, then run:
+Set real values for `PINECONE_API_KEY`, `GOOGLE_GENAI_API_KEY`, and `OPENAI_API_KEY` (used by the Week 6 batch evaluation script) in `rag-api/.env`, then run:
 
 ```bash
 uvicorn app.main:app --reload --port 8000
@@ -130,7 +147,8 @@ Run `npm run dev`, open [http://localhost:3000](http://localhost:3000), choose *
 | --- | --- | --- |
 | `GET` | `/health` | Service health check |
 | `POST` | `/documents` | Upload PDF, create index, and index each page |
-| `POST` | `/query` | Ask a question using the returned `index_name` |
+| `POST` | `/query` | Ask a question using the returned `index_name`; response includes an `evaluation_id` |
+| `POST` | `/evaluate` | Judge the answer behind an `evaluation_id`; returns `{"verdict": "correct" \| "incorrect"}` |
 
 Example query:
 

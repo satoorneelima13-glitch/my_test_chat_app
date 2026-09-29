@@ -10,6 +10,7 @@ from langchain_google_genai import ChatGoogleGenerativeAI
 from pinecone import Pinecone
 
 from .config import Settings
+from .evaluation_store import EvaluationStore
 from .schemas import QuestionResponse, SourcePage, UploadResponse
 
 
@@ -94,7 +95,7 @@ def extract_response_text(content: Any) -> str:
 
 
 class RagService:
-    def __init__(self, settings: Settings):
+    def __init__(self, settings: Settings, evaluation_store: EvaluationStore | None = None):
         self.settings = settings
         self.pc = Pinecone(api_key=settings.pinecone_api_key)
         self.llm = ChatGoogleGenerativeAI(
@@ -102,6 +103,7 @@ class RagService:
             google_api_key=settings.google_genai_api_key,
             temperature=0,
         )
+        self.evaluation_store = evaluation_store or EvaluationStore()
 
     def _wait_until_ready(self, index_name: str, timeout_seconds: int = 120) -> None:
         deadline = time.monotonic() + timeout_seconds
@@ -199,9 +201,18 @@ class RagService:
                 )
                 seen_pages.add(page_number)
 
-        messages = RAG_PROMPT.format_messages(
-            context="\n\n---\n\n".join(context_parts), question=question
-        )
+        context = "\n\n---\n\n".join(context_parts)
+        messages = RAG_PROMPT.format_messages(context=context, question=question)
         response = self.llm.invoke(messages)
         answer = extract_response_text(response.content)
-        return QuestionResponse(answer=answer, index_name=index_name, sources=sources)
+
+        evaluation_id = self.evaluation_store.put(
+            question=question, context=context, answer=answer
+        )
+
+        return QuestionResponse(
+            answer=answer,
+            index_name=index_name,
+            sources=sources,
+            evaluation_id=evaluation_id,
+        )

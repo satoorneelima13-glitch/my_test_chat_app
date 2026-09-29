@@ -1,0 +1,38 @@
+Week 6 - RAG Response Evaluation
+Answer model: gpt-4o-mini | Judge model: gemini-3.1-flash-lite
+========================================
+
+Question 1: Where is Apple's headquarters?
+Answer: Apple's headquarters is located in Cupertino, California.
+Evaluation: correct
+Initial answer model: gpt-4o-mini
+Judge model: gemini-3.1-flash-lite
+----------------------------------------
+
+Question 2: What were Apple's total net sales in 2025?
+Answer: Apple's total net sales in 2025 were $416,161 million.
+Evaluation: correct
+Initial answer model: gpt-4o-mini
+Judge model: gemini-3.1-flash-lite
+----------------------------------------
+
+Question 3: How much revenue did iPhone generate in 2025?
+Answer: iPhone generated $209,586 million in revenue in 2025.
+Evaluation: correct
+Initial answer model: gpt-4o-mini
+Judge model: gemini-3.1-flash-lite
+----------------------------------------
+
+Question 4: How much revenue did Services generate in 2025?
+Answer: Services generated $109,158 million in revenue in 2025.
+Evaluation: correct
+Initial answer model: gpt-4o-mini
+Judge model: gemini-3.1-flash-lite
+----------------------------------------
+
+Question 5: How much revenue did Mac generate in 2025?
+Answer: The Mac generated $33,708 million in revenue in 2025.
+Evaluation: correct
+Initial answer model: gpt-4o-mini
+Judge model: gemini-3.1-flash-lite
+----------------------------------------
