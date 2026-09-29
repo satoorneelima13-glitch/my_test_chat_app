@@ -1,7 +1,17 @@
 "use client";
 
 import { FormEvent, useState } from "react";
-import { Database, FileUp, Search, X } from "lucide-react";
+import {
+  AlertTriangle,
+  CheckCircle2,
+  ClipboardCheck,
+  Database,
+  FileUp,
+  Loader2,
+  Search,
+  X,
+  XCircle,
+} from "lucide-react";
 
 interface UploadResult {
   index_name: string;
@@ -18,7 +28,17 @@ interface SourcePage {
 interface QueryResult {
   answer: string;
   sources: SourcePage[];
+  evaluation_id: string;
 }
+
+type EvaluationStatus =
+  | "idle"
+  | "loading"
+  | "correct"
+  | "incorrect"
+  | "quota-exceeded"
+  | "unavailable"
+  | "error";
 
 interface DocumentQaProps {
   onClose: () => void;
@@ -37,6 +57,7 @@ export default function DocumentQa({ onClose }: DocumentQaProps) {
   const [status, setStatus] = useState("");
   const [uploading, setUploading] = useState(false);
   const [asking, setAsking] = useState(false);
+  const [evaluationStatus, setEvaluationStatus] = useState<EvaluationStatus>("idle");
 
   const uploadPdf = async () => {
     if (!file || uploading) return;
@@ -67,6 +88,7 @@ export default function DocumentQa({ onClose }: DocumentQaProps) {
     setAsking(true);
     setStatus("Searching the uploaded PDF...");
     setResult(null);
+    setEvaluationStatus("idle");
 
     try {
       const response = await fetch("/api/rag/query", {
@@ -82,6 +104,37 @@ export default function DocumentQa({ onClose }: DocumentQaProps) {
       setStatus(error instanceof Error ? error.message : "Question failed.");
     } finally {
       setAsking(false);
+    }
+  };
+
+  const evaluateAnswer = async () => {
+    if (!result || evaluationStatus === "loading") return;
+    setEvaluationStatus("loading");
+
+    try {
+      const response = await fetch("/api/rag/evaluate", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ evaluation_id: result.evaluation_id }),
+      });
+
+      if (response.status === 429) {
+        setEvaluationStatus("quota-exceeded");
+        return;
+      }
+      if (response.status === 503) {
+        setEvaluationStatus("unavailable");
+        return;
+      }
+      if (!response.ok) {
+        setEvaluationStatus("error");
+        return;
+      }
+
+      const data = (await response.json()) as { verdict: "correct" | "incorrect" };
+      setEvaluationStatus(data.verdict);
+    } catch {
+      setEvaluationStatus("error");
     }
   };
 
@@ -164,6 +217,48 @@ export default function DocumentQa({ onClose }: DocumentQaProps) {
                 </li>
               ))}
             </ul>
+
+            <div className="mt-4 flex flex-wrap items-center gap-3 border-t border-blue-200 pt-4">
+              <button
+                type="button"
+                onClick={evaluateAnswer}
+                disabled={evaluationStatus === "loading"}
+                className="flex items-center justify-center gap-2 rounded-lg border border-blue-300 bg-white px-3 py-1.5 text-sm font-medium text-blue-700 hover:bg-blue-100 disabled:cursor-not-allowed disabled:opacity-60"
+              >
+                {evaluationStatus === "loading" ? (
+                  <Loader2 size={16} className="animate-spin" />
+                ) : (
+                  <ClipboardCheck size={16} />
+                )}
+                {evaluationStatus === "loading" ? "Evaluating..." : "Evaluate this answer"}
+              </button>
+
+              {evaluationStatus === "correct" && (
+                <span className="flex items-center gap-1 text-sm font-medium text-green-700">
+                  <CheckCircle2 size={16} /> Judge verdict: correct
+                </span>
+              )}
+              {evaluationStatus === "incorrect" && (
+                <span className="flex items-center gap-1 text-sm font-medium text-red-700">
+                  <XCircle size={16} /> Judge verdict: incorrect
+                </span>
+              )}
+              {evaluationStatus === "quota-exceeded" && (
+                <span className="flex items-center gap-1 text-sm font-medium text-amber-700">
+                  <AlertTriangle size={16} /> Evaluation quota exceeded. Try again later.
+                </span>
+              )}
+              {evaluationStatus === "unavailable" && (
+                <span className="flex items-center gap-1 text-sm font-medium text-amber-700">
+                  <AlertTriangle size={16} /> Judge temporarily unavailable. Try again shortly.
+                </span>
+              )}
+              {evaluationStatus === "error" && (
+                <span className="flex items-center gap-1 text-sm font-medium text-red-700">
+                  <AlertTriangle size={16} /> Could not evaluate this answer.
+                </span>
+              )}
+            </div>
           </div>
         )}
       </section>

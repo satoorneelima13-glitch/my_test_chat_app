@@ -1,3 +1,5 @@
+from typing import Literal
+
 from pydantic import BaseModel, Field
 
 
@@ -23,3 +25,12 @@ class QuestionResponse(BaseModel):
     answer: str
     index_name: str
     sources: list[SourcePage]
+    evaluation_id: str
+
+
+class EvaluateRequest(BaseModel):
+    evaluation_id: str = Field(min_length=1, max_length=64)
+
+
+class EvaluateResponse(BaseModel):
+    verdict: Literal["correct", "incorrect"]

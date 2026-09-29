@@ -1,18 +1,36 @@
 import tempfile
 from functools import lru_cache
 from pathlib import Path
+from typing import Callable
 
 from fastapi import Depends, FastAPI, File, HTTPException, UploadFile, status
 from fastapi.middleware.cors import CORSMiddleware
 
 from .config import Settings, get_settings
-from .schemas import QuestionRequest, QuestionResponse, UploadResponse
+from .evaluation import JudgeQuotaExceeded, JudgeUnavailable, judge_answer
+from .evaluation_store import EvaluationStore
+from .schemas import (
+    EvaluateRequest,
+    EvaluateResponse,
+    QuestionRequest,
+    QuestionResponse,
+    UploadResponse,
+)
 from .service import RagService
 
 
 @lru_cache
+def get_evaluation_store() -> EvaluationStore:
+    return EvaluationStore()
+
+
+@lru_cache
 def get_rag_service() -> RagService:
-    return RagService(get_settings())
+    return RagService(get_settings(), get_evaluation_store())
+
+
+def get_judge() -> Callable[[Settings, str, str, str], str]:
+    return judge_answer
 
 
 settings = get_settings()
@@ -76,3 +94,31 @@ def query_document(
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     except Exception as exc:
         raise HTTPException(status_code=502, detail="Document question answering failed.") from exc
+
+
+@app.post("/evaluate", response_model=EvaluateResponse)
+def evaluate_answer(
+    request: EvaluateRequest,
+    settings: Settings = Depends(get_settings),
+    store: EvaluationStore = Depends(get_evaluation_store),
+    judge: Callable[[Settings, str, str, str], str] = Depends(get_judge),
+) -> EvaluateResponse:
+    record = store.get(request.evaluation_id)
+    if record is None:
+        raise HTTPException(
+            status_code=404,
+            detail="This answer is no longer available to evaluate.",
+        )
+
+    try:
+        verdict = judge(settings, record.question, record.context, record.answer)
+    except JudgeQuotaExceeded as exc:
+        raise HTTPException(status_code=429, detail=str(exc)) from exc
+    except JudgeUnavailable as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    except Exception as exc:
+        raise HTTPException(
+            status_code=502, detail="The judge could not evaluate this answer."
+        ) from exc
+
+    return EvaluateResponse(verdict=verdict)
